@@ -141,17 +141,30 @@ export default function HomePage() {
     <Screen statusBarStyle="light">
       <View className="flex-1 bg-gray-950">
         {/* Header */}
-        <View className="pt-12 pb-6 px-6">
+        <View className="pt-12 pb-4 px-6">
           <Text className="text-2xl font-bold text-white text-center">
-            ASIIN 智能对话
+            ASIIN 智能座谈助手
           </Text>
           <Text className="text-sm text-gray-400 text-center mt-2">
-            英文语音提问 → 中文回答 → 英文回答
+            Computer Science & Technology
           </Text>
         </View>
 
+        {/* Topic Tags */}
+        <View className="px-4 mb-4">
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View className="flex-row gap-2">
+              {['教育目标', '课程设置', '教学内容', '学生支持', '考试组织', '学习成果', '就业市场', '学生流动'].map((topic) => (
+                <View key={topic} className="px-3 py-1 bg-gray-800 rounded-full border border-cyan-500/30">
+                  <Text className="text-xs text-cyan-400">{topic}</Text>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        </View>
+
         {/* Recording Button */}
-        <View className="items-center justify-center py-8">
+        <View className="items-center justify-center py-6">
           <TouchableOpacity
             onPress={toggleRecording}
             disabled={isProcessing}

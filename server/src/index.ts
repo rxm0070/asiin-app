@@ -48,16 +48,40 @@ app.post('/api/v1/chat/process', async (req, res) => {
     }
 
     // Step 2: Generate answers using LLM
-    // System prompt for ASIIN certification context
-    const systemPrompt = `You are a professional assistant for ASIIN certification discussions. 
-Please answer questions in both Chinese and English.
-First provide the Chinese answer, then the English answer.
-Keep answers clear, concise, and professional.
-If the question is in English, still provide both Chinese and English answers.`;
+    // System prompt for ASIIN certification context - Computer Science & Technology
+    const systemPromptCN = `You are a professional assistant for ASIIN accreditation quality audit discussions at a Computer Science and Technology program.
+
+The discussion focuses on these key areas:
+- Educational goals (教育目标)
+- Curriculum (课程设置)
+- Course of studies (学习课程)
+- Contents and methods of teaching (教学内容与方法)
+- Counseling and support for students (学生辅导与支持)
+- Organization of exams (考试组织)
+- Study results (学习成果)
+- Relevance for the labor market (就业相关性)
+- Student mobility (学生流动性)
+
+Please answer in Chinese. Keep answers clear, concise, professional, and specific to Computer Science & Technology. Focus on software engineering, algorithms, data structures, databases, networks, operating systems, artificial intelligence, and related fields.`;
+
+    const systemPromptEN = `You are a professional assistant for ASIIN accreditation quality audit discussions at a Computer Science and Technology program.
+
+The discussion focuses on these key areas:
+- Educational goals
+- Curriculum
+- Course of studies  
+- Contents and methods of teaching
+- Counseling and support for students
+- Organization of exams
+- Study results
+- Relevance for the labor market
+- Student mobility
+
+Please answer professionally and clearly in English, focusing on Computer Science & Technology topics including software engineering, algorithms, data structures, databases, computer networks, operating systems, artificial intelligence, and software development practices.`;
 
     // Generate Chinese answer
     const cnMessages = [
-      { role: 'system' as const, content: systemPrompt },
+      { role: 'system' as const, content: systemPromptCN },
       { role: 'user' as const, content: recognizedText }
     ];
 
@@ -72,11 +96,8 @@ If the question is in English, still provide both Chinese and English answers.`;
     }
 
     // Generate English answer
-    const enSystemPrompt = `You are a professional assistant for ASIIN certification discussions.
-Please answer questions professionally and clearly in English.`;
-
     const enMessages = [
-      { role: 'system' as const, content: enSystemPrompt },
+      { role: 'system' as const, content: systemPromptEN },
       { role: 'user' as const, content: recognizedText }
     ];
 
