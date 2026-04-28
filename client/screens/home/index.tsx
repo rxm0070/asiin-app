@@ -142,11 +142,14 @@ export default function HomePage() {
       <View className="flex-1 bg-gray-950">
         {/* Header */}
         <View className="pt-12 pb-4 px-6">
-          <Text className="text-2xl font-bold text-white text-center">
-            ASIIN 智能座谈助手
+          <Text className="text-xl font-bold text-white text-center">
+            泰州学院
           </Text>
-          <Text className="text-sm text-gray-400 text-center mt-2">
+          <Text className="text-base text-cyan-400 text-center mt-1">
             Computer Science & Technology
+          </Text>
+          <Text className="text-xs text-gray-500 text-center mt-1">
+            ASIIN 认证座谈
           </Text>
         </View>
 
