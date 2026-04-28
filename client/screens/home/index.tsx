@@ -149,7 +149,7 @@ export default function HomePage() {
             Computer Science & Technology
           </Text>
           <Text className="text-xs text-gray-500 text-center mt-1">
-            ASIIN 认证座谈
+            ASIIN 认证座谈 | 支持中英文提问
           </Text>
         </View>
 
@@ -193,7 +193,7 @@ export default function HomePage() {
             {isRecording ? '点击停止' : '点击录音'}
           </Text>
           <Text className="text-gray-500 text-sm mt-1">
-            请用英文提问
+            请用中文或英文提问
           </Text>
         </View>
 

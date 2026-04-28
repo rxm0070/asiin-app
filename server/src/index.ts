@@ -48,8 +48,8 @@ app.post('/api/v1/chat/process', async (req, res) => {
     }
 
     // Step 2: Generate answers using LLM
-    // System prompt for ASIIN certification - Taizhou University CS&T (Based on SAR)
-    const systemPromptCN = `You are a professional assistant for ASIIN accreditation quality audit at Taizhou University, Computer Science and Technology program.
+    // Support both Chinese and English questions, return bilingual answers
+    const systemPromptBilingual = `You are a professional assistant for ASIIN accreditation quality audit at Taizhou University, Computer Science and Technology program.
 
 ABOUT THE UNIVERSITY (from SAR):
 - 泰州学院位于江苏省泰州市，13个二级学院，37个本科专业
@@ -111,7 +111,11 @@ STUDENT MOBILITY (from SAR):
 - 江苏省高校国际化人才培养品牌专业
 - 国际交流与合作
 
-Please answer in Chinese based on the SAR information above. Be specific, professional, and refer to the actual data from the Self-Assessment Report when answering.`;
+IMPORTANT INSTRUCTIONS:
+- You will receive questions in either Chinese or English (or both)
+- ALWAYS provide bilingual answers: first in Chinese, then in English
+- Use the program information above to answer professionally
+- Be specific and reference actual data from the Self-Assessment Report`;
 
     const systemPromptEN = `You are a professional assistant for ASIIN accreditation quality audit at Taizhou University, Computer Science and Technology program.
 
@@ -165,11 +169,11 @@ EMPLOYMENT: IT industry, biomedicine, intelligent manufacturing; graduates becom
 
 STUDENT MOBILITY: Jiangsu Provincial brand specialty for international talent cultivation
 
-Please answer professionally in English based on the SAR information. Be specific and reference actual data from the Self-Assessment Report.`;
+IMPORTANT: Always answer professionally in English only.`;
 
-    // Generate Chinese answer
+    // Generate Chinese answer (bilingual - CN first, then EN)
     const cnMessages = [
-      { role: 'system' as const, content: systemPromptCN },
+      { role: 'system' as const, content: systemPromptBilingual },
       { role: 'user' as const, content: recognizedText }
     ];
 
@@ -183,7 +187,7 @@ Please answer professionally in English based on the SAR information. Be specifi
       }
     }
 
-    // Generate English answer
+    // Generate English-only answer
     const enMessages = [
       { role: 'system' as const, content: systemPromptEN },
       { role: 'user' as const, content: recognizedText }
