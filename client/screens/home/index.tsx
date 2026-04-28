@@ -351,18 +351,18 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   label: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#00f0ff',
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 16,
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
   question: {
-    fontSize: 18,
+    fontSize: 22,
     color: '#fff',
-    lineHeight: 28,
-    fontWeight: '500',
+    lineHeight: 34,
+    fontWeight: '600',
   },
   divider: {
     height: 1,
@@ -370,9 +370,9 @@ const styles = StyleSheet.create({
     marginVertical: 30,
   },
   answer: {
-    fontSize: 16,
+    fontSize: 20,
     color: '#e0e0e0',
-    lineHeight: 28,
+    lineHeight: 34,
   },
   loadingAnswer: {
     flexDirection: 'row',
