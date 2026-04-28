@@ -13,8 +13,7 @@ app.get('/api/v1/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
-// Program info for context
-const programInfo = `泰州学院计算机科学与技术专业 - ASIIN认证座谈
+const programInfo = `泰州学院计算机科学与技术专业 - ASIIN认证座谈助手
 学校: 13个学院, 37个本科专业, 800+教师, 13500+学生
 学院: 信息工程学院(2014年成立)
 专业: 2015本科招生, 2022省一流专业, 2023卓越工程师计划2.0
@@ -22,13 +21,12 @@ const programInfo = `泰州学院计算机科学与技术专业 - ASIIN认证座
 课程: 基础学科/专业课程/通识课程/综合实践
 核心: C语言, 离散数学, 数据结构, 算法, 操作系统, 计算机网络, 软件工程, AI
 
-培养目标: 应用型计算机工程人才, 12条毕业要求(ASIIN TC04)
-考试: 多样化考核
+培养: 应用型计算机工程人才, 12条毕业要求(ASIIN TC04)
 资源: 52名教职工(5教授/18副教授/26博士), 19个实验室(1522万元)
 就业: IT/生物医药/智能制造
 国际化: 江苏省国际化人才培养品牌专业`;
 
-// Stream-based API - returns separate Chinese and English answers
+// Stream-based API - returns consistent Chinese and English answers
 app.post('/api/v1/chat/stream', async (req, res) => {
   try {
     const { audio } = req.body;
@@ -61,22 +59,22 @@ app.post('/api/v1/chat/stream', async (req, res) => {
     // Send recognized question
     res.write(`data: ${JSON.stringify({ type: 'question', content: recognizedText })}\n\n`);
 
-    // Generate Chinese answer
+    // Step 1: Generate Chinese answer
     const cnMessages = [
-      { role: 'system' as const, content: `你是泰州学院计算机科学与技术专业的ASIIN认证座谈助手。请用纯中文回答问题，不要包含任何英文。
+      { role: 'system' as const, content: `你是泰州学院计算机科学与技术专业的ASIIN认证座谈助手。请用纯中文回答。
 
 ${programInfo}
 
 回答要求：
-- 只用中文回答
-- 专业、简洁、具体
+- 只用中文回答，不要包含任何英文
+- 专业、简洁、具体、全面
 - 基于以上信息回答` },
       { role: 'user' as const, content: recognizedText }
     ];
 
     let cnAnswer = '';
     for await (const chunk of llmClient.stream(cnMessages, { 
-      temperature: 0.7,
+      temperature: 0.3,  // Lower temperature for consistency
       model: 'doubao-seed-1-6-251015'
     })) {
       if (chunk.content) {
@@ -85,30 +83,15 @@ ${programInfo}
       }
     }
 
-    // Generate English answer
+    // Step 2: Translate Chinese answer to English (ensures consistency)
     const enMessages = [
-      { role: 'system' as const, content: `You are an ASIIN accreditation assistant for Taizhou University's Computer Science & Technology program. Answer in English only.
-
-About the program:
-- Taizhou University, 13 colleges, 37 programs, 800+ teachers, 13500+ students
-- College of Information Engineering (founded 2014)
-- 2015 undergrad enrollment, 2022 Jiangsu first-class specialty, 2023 Outstanding Engineer Program 2.0
-
-Curriculum: Basic/Specialized/General/Practical modules
-Core courses: C, Discrete Math, Data Structures, Algorithms, OS, Networks, Software Engineering, AI
-
-Goals: Applied CS engineers, 12 graduation requirements (ASIIN TC04)
-Resources: 52 faculty (5 prof/18 assoc prof/26 PhDs), 19 labs (15.22M yuan)
-Employment: IT/Biomedicine/Manufacturing
-International: Jiangsu brand specialty for international talent cultivation
-
-Answer professionally in English only.` },
-      { role: 'user' as const, content: recognizedText }
+      { role: 'system' as const, content: `You are a professional translator. Translate the following Chinese text to English. Keep the meaning, structure, and key points exactly the same. Only output the English translation, nothing else.` },
+      { role: 'user' as const, content: cnAnswer }
     ];
 
     let enAnswer = '';
     for await (const chunk of llmClient.stream(enMessages, { 
-      temperature: 0.7,
+      temperature: 0.3,  // Lower temperature for consistency
       model: 'doubao-seed-1-6-251015'
     })) {
       if (chunk.content) {
