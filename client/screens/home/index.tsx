@@ -3,7 +3,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Screen } from '@/components/Screen';
-import { RNSSE } from 'react-native-sse';
+import SSE from 'react-native-sse';
 
 type Mode = 'idle' | 'recording' | 'processing' | 'answering';
 
@@ -12,31 +12,46 @@ export default function HomePage() {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [question, setQuestion] = useState<string>('');
   const [answer, setAnswer] = useState<string>('');
+  const [error, setError] = useState<string>('');
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const eventSourceRef = useRef<any>(null);
 
   useEffect(() => {
     (async () => {
-      const { status } = await Audio.requestPermissionsAsync();
-      setHasPermission(status === 'granted');
+      try {
+        const { status } = await Audio.requestPermissionsAsync();
+        setHasPermission(status === 'granted');
+      } catch (err) {
+        console.error('Permission error:', err);
+      }
     })();
+    
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
   }, []);
 
   const startRecording = async () => {
-    if (!hasPermission) {
-      const { status } = await Audio.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('需要权限', '请授予麦克风权限');
-        return;
-      }
-      setHasPermission(true);
-    }
-
-    if (recordingRef.current) {
-      await recordingRef.current.stopAndUnloadAsync();
-      recordingRef.current = null;
-    }
-
+    console.log('Starting recording...');
+    setError('');
+    
     try {
+      if (!hasPermission) {
+        const { status } = await Audio.requestPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('需要权限', '请授予麦克风权限');
+          return;
+        }
+        setHasPermission(true);
+      }
+
+      if (recordingRef.current) {
+        await recordingRef.current.stopAndUnloadAsync();
+        recordingRef.current = null;
+      }
+
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
       const recording = new Audio.Recording();
       await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
@@ -45,94 +60,163 @@ export default function HomePage() {
       setMode('recording');
       setQuestion('');
       setAnswer('');
-    } catch (error: any) {
-      Alert.alert('录音失败', error.message || '请在真机上测试');
+      setError('');
+      console.log('Recording started');
+    } catch (err: any) {
+      console.error('Start recording error:', err);
+      Alert.alert('录音失败', err.message || String(err));
     }
   };
 
   const stopRecording = async () => {
-    if (!recordingRef.current) return;
+    console.log('Stopping recording...');
+    if (!recordingRef.current) {
+      return;
+    }
 
     try {
+      const status = await recordingRef.current.getStatusAsync();
+      console.log('Recording duration:', status.durationMillis);
+      
+      if (status.durationMillis < 500) {
+        Alert.alert('录音太短', '请录制至少1秒钟');
+        await recordingRef.current.stopAndUnloadAsync();
+        recordingRef.current = null;
+        setMode('idle');
+        return;
+      }
+
       await recordingRef.current.stopAndUnloadAsync();
       const uri = recordingRef.current.getURI();
       recordingRef.current = null;
-      setMode('processing');
-
+      
+      console.log('Recording URI:', uri);
+      
       if (uri) {
+        setMode('processing');
         await processAudio(uri);
       } else {
-        Alert.alert('错误', '录音无效');
+        Alert.alert('错误', '录音文件无效');
         setMode('idle');
       }
-    } catch (error) {
+    } catch (err: any) {
+      console.error('Stop recording error:', err);
+      Alert.alert('停止录音失败', err.message || String(err));
       setMode('idle');
     }
   };
 
   const processAudio = async (audioUri: string) => {
+    console.log('Processing audio:', audioUri);
+    setError('');
+    
     try {
+      // Read audio file as base64
       const base64Audio = await (FileSystem as any).readAsStringAsync(audioUri, {
         encoding: (FileSystem as any).EncodingType.Base64,
       });
+      
+      console.log('Base64 length:', base64Audio.length);
+      
+      if (base64Audio.length < 100) {
+        Alert.alert('错误', '录音文件太小，请重新录音');
+        setMode('idle');
+        return;
+      }
 
       setMode('answering');
-      const url = `${process.env.EXPO_PUBLIC_BACKEND_BASE_URL}/api/v1/chat/stream`;
+      setQuestion('');
+      setAnswer('');
+
+      const baseUrl = process.env.EXPO_PUBLIC_BACKEND_BASE_URL;
+      const url = `${baseUrl}/api/v1/chat/stream`;
+      console.log('Request URL:', url);
       
-      const sse = new RNSSE(url, {
+      // Use EventSource for SSE
+      const eventSource = new SSE(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({ audio: base64Audio }),
       });
+      
+      eventSourceRef.current = eventSource;
 
-      sse.addEventListener('message', (event: any) => {
-        if (!event.data) return;
+      eventSource.addEventListener('message', (e: any) => {
+        console.log('SSE message:', e.data);
         try {
-          const data = JSON.parse(event.data);
+          const data = JSON.parse(e.data);
+          
           if (data.type === 'question') {
             setQuestion(data.content);
           } else if (data.type === 'answer') {
             setAnswer(prev => prev + data.content);
-          } else if (data.type === 'done' || data.type === 'error') {
-            sse.close();
-            if (data.type === 'error') {
-              Alert.alert('错误', data.message);
-            }
+          } else if (data.type === 'done') {
+            console.log('Stream complete');
+            eventSource.close();
+          } else if (data.type === 'error') {
+            setError(data.message || '处理失败');
+            eventSource.close();
           }
-        } catch (e) {}
+        } catch (err) {
+          console.error('Parse error:', err);
+        }
       });
 
-      sse.addEventListener('error', () => {
-        sse.close();
+      eventSource.addEventListener('error', (err: any) => {
+        console.error('SSE error:', err);
+        eventSource.close();
         Alert.alert('错误', '连接失败');
         setMode('idle');
       });
 
-    } catch (error) {
-      Alert.alert('错误', '处理失败');
+    } catch (err: any) {
+      console.error('Process audio error:', err);
+      setError(err.message || '处理失败');
+      Alert.alert('错误', '处理音频失败: ' + (err.message || String(err)));
       setMode('idle');
     }
   };
 
   const reset = () => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
     setMode('idle');
     setQuestion('');
     setAnswer('');
+    setError('');
   };
 
   // Full screen answer view
-  if (mode === 'answering' && answer) {
+  if ((mode === 'answering' || mode === 'processing') && (answer || question)) {
     return (
       <Screen statusBarStyle="light">
         <View style={styles.fullScreen}>
+          {mode === 'processing' && (
+            <View style={styles.processingBar}>
+              <ActivityIndicator color="#00f0ff" size="small" />
+              <Text style={styles.processingText}>处理中...</Text>
+            </View>
+          )}
+          
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
             <Text style={styles.label}>问题</Text>
-            <Text style={styles.question}>{question}</Text>
+            <Text style={styles.question}>{question || '...'}</Text>
             
             <View style={styles.divider} />
             
             <Text style={styles.label}>回答</Text>
-            <Text style={styles.answer}>{answer}</Text>
+            {mode === 'processing' && !answer ? (
+              <View style={styles.loadingAnswer}>
+                <ActivityIndicator color="#00f0ff" />
+                <Text style={styles.loadingText}>生成回答中...</Text>
+              </View>
+            ) : (
+              <Text style={styles.answer}>{answer || '...'}</Text>
+            )}
           </ScrollView>
           
           <TouchableOpacity style={styles.resetButton} onPress={reset}>
@@ -143,7 +227,21 @@ export default function HomePage() {
     );
   }
 
-  // Idle / Recording / Processing view
+  // Error view
+  if (error) {
+    return (
+      <Screen statusBarStyle="light">
+        <View style={styles.container}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={reset}>
+            <Text style={styles.retryText}>重试</Text>
+          </TouchableOpacity>
+        </View>
+      </Screen>
+    );
+  }
+
+  // Idle / Recording view
   return (
     <Screen statusBarStyle="light">
       <View style={styles.container}>
@@ -151,20 +249,14 @@ export default function HomePage() {
         <Text style={styles.subtitle}>计算机科学与技术 · ASIIN座谈</Text>
 
         <TouchableOpacity
-          style={[
-            styles.recordButton,
-            mode === 'recording' && styles.recordingButton
-          ]}
+          style={[styles.recordButton, mode === 'recording' && styles.recordingButton]}
           onPress={mode === 'recording' ? stopRecording : startRecording}
           disabled={mode === 'processing'}
         >
           {mode === 'processing' ? (
             <ActivityIndicator color="#fff" size="large" />
           ) : (
-            <View style={[
-              styles.recordIcon,
-              mode === 'recording' && styles.recordingIcon
-            ]} />
+            <View style={[styles.recordIcon, mode === 'recording' && styles.recordingIcon]} />
           )}
         </TouchableOpacity>
 
@@ -235,10 +327,21 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 8,
   },
-  // Full screen answer styles
   fullScreen: {
     flex: 1,
     backgroundColor: '#0a0a0f',
+  },
+  processingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    backgroundColor: '#1a1a2e',
+    gap: 8,
+  },
+  processingText: {
+    color: '#00f0ff',
+    fontSize: 14,
   },
   scrollView: {
     flex: 1,
@@ -271,6 +374,15 @@ const styles = StyleSheet.create({
     color: '#e0e0e0',
     lineHeight: 28,
   },
+  loadingAnswer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    color: '#666',
+    fontSize: 14,
+  },
   resetButton: {
     position: 'absolute',
     bottom: 50,
@@ -285,5 +397,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#0a0a0f',
+  },
+  errorText: {
+    color: '#ef4444',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#00f0ff',
+    paddingHorizontal: 40,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryText: {
+    color: '#0a0a0f',
+    fontWeight: '600',
   },
 });
