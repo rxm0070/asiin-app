@@ -16,6 +16,7 @@ export default function HomePage() {
   const [isRecording, setIsRecording] = useState(false);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [recordingStatus, setRecordingStatus] = useState<string>('ready');
   const [currentQuestion, setCurrentQuestion] = useState<string>('');
   const [currentAnswerCN, setCurrentAnswerCN] = useState<string>('');
   const [currentAnswerEN, setCurrentAnswerEN] = useState<string>('');
@@ -26,57 +27,108 @@ export default function HomePage() {
   // Request microphone permission on mount
   useEffect(() => {
     (async () => {
-      const { status } = await Audio.requestPermissionsAsync();
-      setHasPermission(status === 'granted');
+      try {
+        const { status } = await Audio.requestPermissionsAsync();
+        setHasPermission(status === 'granted');
+        console.log('Microphone permission:', status);
+      } catch (error) {
+        console.error('Permission error:', error);
+      }
     })();
   }, []);
 
   const startRecording = async () => {
-    if (!hasPermission) {
-      const { status } = await Audio.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('需要权限', '请授予录音权限');
-        return;
-      }
-      setHasPermission(true);
-    }
-
-    if (recordingRef.current) {
-      await recordingRef.current.stopAndUnloadAsync();
-      recordingRef.current = null;
-    }
-
+    console.log('Starting recording...');
+    setRecordingStatus('requesting');
+    
     try {
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      // Request permission first
+      if (!hasPermission) {
+        setRecordingStatus('requesting_permission');
+        const { status } = await Audio.requestPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('需要权限', '请授予麦克风权限才能录音');
+          setRecordingStatus('permission_denied');
+          return;
+        }
+        setHasPermission(true);
+      }
+
+      // Stop any existing recording
+      if (recordingRef.current) {
+        await recordingRef.current.stopAndUnloadAsync();
+        recordingRef.current = null;
+      }
+
+      setRecordingStatus('preparing');
+      
+      // Configure audio mode for recording
+      await Audio.setAudioModeAsync({ 
+        allowsRecordingIOS: true, 
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+
+      // Create and start recording
       const recording = new Audio.Recording();
+      
+      // Set up status update listener
+      recording.setOnRecordingStatusUpdate((status) => {
+        console.log('Recording status:', status);
+        if (status.isRecording) {
+          setRecordingStatus('recording');
+        }
+      });
+
+      // Prepare and start
       await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       await recording.startAsync();
+      
       recordingRef.current = recording;
       setIsRecording(true);
+      setRecordingStatus('recording');
       setCurrentQuestion('');
       setCurrentAnswerCN('');
       setCurrentAnswerEN('');
-    } catch (error) {
+      
+      console.log('Recording started successfully');
+      
+    } catch (error: any) {
       console.error('录音失败:', error);
-      Alert.alert('错误', '录音启动失败');
+      setRecordingStatus('error');
+      Alert.alert('录音失败', `无法启动录音: ${error.message || '请在真机上测试（模拟器不支持录音）'}`);
     }
   };
 
   const stopRecording = async () => {
-    if (!recordingRef.current) return;
+    console.log('Stopping recording...');
+    if (!recordingRef.current) {
+      console.log('No recording to stop');
+      return;
+    }
 
     try {
+      setRecordingStatus('stopping');
       await recordingRef.current.stopAndUnloadAsync();
       const uri = recordingRef.current.getURI();
       recordingRef.current = null;
       setIsRecording(false);
+      setRecordingStatus('processing');
+
+      console.log('Recording stopped, URI:', uri);
 
       if (uri) {
         await processAudio(uri);
+      } else {
+        Alert.alert('错误', '录音文件无效');
+        setRecordingStatus('ready');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('停止录音失败:', error);
       setIsRecording(false);
+      setRecordingStatus('error');
+      Alert.alert('错误', '停止录音失败');
     }
   };
 
@@ -190,10 +242,25 @@ export default function HomePage() {
             )}
           </TouchableOpacity>
           <Text className="text-white mt-4 text-lg font-medium">
-            {isRecording ? '点击停止' : '点击录音'}
+            {isProcessing ? '处理中...' : isRecording ? '点击停止' : '点击录音'}
           </Text>
           <Text className="text-gray-500 text-sm mt-1">
             请用中文或英文提问
+          </Text>
+          
+          {/* Recording Status */}
+          <View className="mt-3 px-4 py-2 bg-gray-900/50 rounded-lg">
+            <Text className="text-xs text-gray-400">
+              状态: {recordingStatus === 'recording' ? '正在录音 🔴' : 
+                     recordingStatus === 'processing' ? '处理中...' :
+                     recordingStatus === 'requesting_permission' ? '请求权限...' :
+                     '就绪'}
+            </Text>
+          </View>
+          
+          {/* Platform Note */}
+          <Text className="text-xs text-gray-600 mt-4">
+            💡 提示: 请在真机或模拟器上测试录音功能
           </Text>
         </View>
 
