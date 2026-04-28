@@ -13,20 +13,20 @@ app.get('/api/v1/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
-const programInfo = `泰州学院计算机科学与技术专业 - ASIIN认证座谈助手
-学校: 13个学院, 37个本科专业, 800+教师, 13500+学生
-学院: 信息工程学院(2014年成立)
-专业: 2015本科招生, 2022省一流专业, 2023卓越工程师计划2.0
+const programInfo = `泰州学院计算机科学与技术专业 - ASIIN认证座谈
+学校信息: 13个学院, 37个本科专业, 800+教师, 13500+学生
+学院: 信息工程学院(2014年成立, 含计算机/物联网/大数据/网络安全专业)
+专业历史: 2015本科招生, 2022省一流专业, 2023卓越工程师计划2.0
 
-课程: 基础学科/专业课程/通识课程/综合实践
-核心: C语言, 离散数学, 数据结构, 算法, 操作系统, 计算机网络, 软件工程, AI
+课程体系: 基础学科/专业课程/通识课程/综合实践
+核心课程: C语言, 离散数学, 数据结构, 算法, 操作系统, 计算机网络, 软件工程, 数据库, 人工智能
+资源: 52名教职工(5教授/18副教授/26博士), 19个实验室(1522万元设备)
+培养: 应用型计算机工程人才, 12条毕业要求(ASIIN TC04标准)
+就业: IT/生物医药/智能制造领域
+国际化: 江苏省国际化人才培养品牌专业
+学生成果: 400+省级以上竞赛奖, 80+创新项目, 100+专利`;
 
-培养: 应用型计算机工程人才, 12条毕业要求(ASIIN TC04)
-资源: 52名教职工(5教授/18副教授/26博士), 19个实验室(1522万元)
-就业: IT/生物医药/智能制造
-国际化: 江苏省国际化人才培养品牌专业`;
-
-// Stream-based API - returns consistent Chinese and English answers
+// Stream-based API
 app.post('/api/v1/chat/stream', async (req, res) => {
   try {
     const { audio } = req.body;
@@ -46,7 +46,7 @@ app.post('/api/v1/chat/stream', async (req, res) => {
     const asrClient = new ASRClient(config);
     const llmClient = new LLMClient(config);
 
-    // ASR - recognize speech
+    // ASR
     const asrResult = await asrClient.recognize({ uid: 'user-001', base64Data: audio });
     const recognizedText = asrResult.text || '';
 
@@ -56,25 +56,25 @@ app.post('/api/v1/chat/stream', async (req, res) => {
       return;
     }
 
-    // Send recognized question
     res.write(`data: ${JSON.stringify({ type: 'question', content: recognizedText })}\n\n`);
 
-    // Step 1: Generate Chinese answer
+    // Generate Chinese answer
     const cnMessages = [
-      { role: 'system' as const, content: `你是泰州学院计算机科学与技术专业的ASIIN认证座谈助手。请用纯中文回答。
+      { role: 'system' as const, content: `你是泰州学院计算机科学与技术专业的ASIIN认证座谈助手。
 
 ${programInfo}
 
-回答要求：
-- 只用中文回答，不要包含任何英文
-- 专业、简洁、具体、全面
-- 基于以上信息回答` },
+回答规则:
+1. 优先使用以上提供的信息来回答问题
+2. 如果提供的信息无法完全回答问题，请在专业合理范围内给出可参考的答案，并在回答开头说明"根据专业建设的一般情况..."
+3. 回答要专业、简洁、具体
+4. 只用中文回答，不要包含英文` },
       { role: 'user' as const, content: recognizedText }
     ];
 
     let cnAnswer = '';
     for await (const chunk of llmClient.stream(cnMessages, { 
-      temperature: 0.3,  // Lower temperature for consistency
+      temperature: 0.3,
       model: 'doubao-seed-1-6-251015'
     })) {
       if (chunk.content) {
@@ -83,15 +83,28 @@ ${programInfo}
       }
     }
 
-    // Step 2: Translate Chinese answer to English (ensures consistency)
+    // Translate to English - use simple, common words
     const enMessages = [
-      { role: 'system' as const, content: `You are a professional translator. Translate the following Chinese text to English. Keep the meaning, structure, and key points exactly the same. Only output the English translation, nothing else.` },
+      { role: 'system' as const, content: `You are a professional translator. Translate Chinese text to English.
+
+Rules:
+1. Keep the meaning exactly the same
+2. Use simple, common, everyday English words
+3. Avoid rare words, academic jargon, and complex vocabulary
+4. Use short sentences when possible
+5. Only output the English translation, nothing else
+
+Examples:
+- "培养应用型计算机工程人才" → "Train applied computer engineering talents"
+- "产教融合" → "Combine education with industry practice"
+- "多样化考核" → "Use different ways to assess students"
+- "终身学习" → "Keep learning throughout life"` },
       { role: 'user' as const, content: cnAnswer }
     ];
 
     let enAnswer = '';
     for await (const chunk of llmClient.stream(enMessages, { 
-      temperature: 0.3,  // Lower temperature for consistency
+      temperature: 0.3,
       model: 'doubao-seed-1-6-251015'
     })) {
       if (chunk.content) {
@@ -100,7 +113,6 @@ ${programInfo}
       }
     }
 
-    // Done
     res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
     res.end();
 
