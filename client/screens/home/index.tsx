@@ -11,7 +11,8 @@ export default function HomePage() {
   const [mode, setMode] = useState<Mode>('idle');
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [question, setQuestion] = useState<string>('');
-  const [answer, setAnswer] = useState<string>('');
+  const [answerCN, setAnswerCN] = useState<string>('');
+  const [answerEN, setAnswerEN] = useState<string>('');
   const [error, setError] = useState<string>('');
   const recordingRef = useRef<Audio.Recording | null>(null);
   const eventSourceRef = useRef<any>(null);
@@ -59,24 +60,19 @@ export default function HomePage() {
       recordingRef.current = recording;
       setMode('recording');
       setQuestion('');
-      setAnswer('');
+      setAnswerCN('');
+      setAnswerEN('');
       setError('');
-      console.log('Recording started');
     } catch (err: any) {
-      console.error('Start recording error:', err);
       Alert.alert('录音失败', err.message || String(err));
     }
   };
 
   const stopRecording = async () => {
-    console.log('Stopping recording...');
-    if (!recordingRef.current) {
-      return;
-    }
+    if (!recordingRef.current) return;
 
     try {
       const status = await recordingRef.current.getStatusAsync();
-      console.log('Recording duration:', status.durationMillis);
       
       if (status.durationMillis < 500) {
         Alert.alert('录音太短', '请录制至少1秒钟');
@@ -90,8 +86,6 @@ export default function HomePage() {
       const uri = recordingRef.current.getURI();
       recordingRef.current = null;
       
-      console.log('Recording URI:', uri);
-      
       if (uri) {
         setMode('processing');
         await processAudio(uri);
@@ -100,81 +94,68 @@ export default function HomePage() {
         setMode('idle');
       }
     } catch (err: any) {
-      console.error('Stop recording error:', err);
       Alert.alert('停止录音失败', err.message || String(err));
       setMode('idle');
     }
   };
 
   const processAudio = async (audioUri: string) => {
-    console.log('Processing audio:', audioUri);
     setError('');
     
     try {
-      // Read audio file as base64
       const base64Audio = await (FileSystem as any).readAsStringAsync(audioUri, {
         encoding: (FileSystem as any).EncodingType.Base64,
       });
       
-      console.log('Base64 length:', base64Audio.length);
-      
       if (base64Audio.length < 100) {
-        Alert.alert('错误', '录音文件太小，请重新录音');
+        Alert.alert('错误', '录音文件太小');
         setMode('idle');
         return;
       }
 
       setMode('answering');
       setQuestion('');
-      setAnswer('');
+      setAnswerCN('');
+      setAnswerEN('');
 
       const baseUrl = process.env.EXPO_PUBLIC_BACKEND_BASE_URL;
       const url = `${baseUrl}/api/v1/chat/stream`;
-      console.log('Request URL:', url);
       
-      // Use EventSource for SSE
       const eventSource = new SSE(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ audio: base64Audio }),
       });
       
       eventSourceRef.current = eventSource;
 
       eventSource.addEventListener('message', (e: any) => {
-        console.log('SSE message:', e.data);
         try {
           const data = JSON.parse(e.data);
           
           if (data.type === 'question') {
             setQuestion(data.content);
-          } else if (data.type === 'answer') {
-            setAnswer(prev => prev + data.content);
+          } else if (data.type === 'answer_cn') {
+            setAnswerCN(prev => prev + data.content);
+          } else if (data.type === 'answer_en') {
+            setAnswerEN(prev => prev + data.content);
           } else if (data.type === 'done') {
-            console.log('Stream complete');
             eventSource.close();
           } else if (data.type === 'error') {
-            setError(data.message || '处理失败');
+            setError(data.message);
             eventSource.close();
           }
-        } catch (err) {
-          console.error('Parse error:', err);
-        }
+        } catch (err) {}
       });
 
-      eventSource.addEventListener('error', (err: any) => {
-        console.error('SSE error:', err);
+      eventSource.addEventListener('error', () => {
         eventSource.close();
         Alert.alert('错误', '连接失败');
         setMode('idle');
       });
 
     } catch (err: any) {
-      console.error('Process audio error:', err);
-      setError(err.message || '处理失败');
-      Alert.alert('错误', '处理音频失败: ' + (err.message || String(err)));
+      Alert.alert('错误', '处理失败');
       setMode('idle');
     }
   };
@@ -186,36 +167,45 @@ export default function HomePage() {
     }
     setMode('idle');
     setQuestion('');
-    setAnswer('');
+    setAnswerCN('');
+    setAnswerEN('');
     setError('');
   };
 
   // Full screen answer view
-  if ((mode === 'answering' || mode === 'processing') && (answer || question)) {
+  if ((mode === 'answering' || mode === 'processing') && (answerCN || answerEN || question)) {
     return (
       <Screen statusBarStyle="light">
         <View style={styles.fullScreen}>
-          {mode === 'processing' && (
-            <View style={styles.processingBar}>
-              <ActivityIndicator color="#00f0ff" size="small" />
-              <Text style={styles.processingText}>处理中...</Text>
-            </View>
-          )}
-          
           <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+            {/* Question */}
             <Text style={styles.label}>问题</Text>
             <Text style={styles.question}>{question || '...'}</Text>
             
             <View style={styles.divider} />
             
-            <Text style={styles.label}>回答</Text>
-            {mode === 'processing' && !answer ? (
-              <View style={styles.loadingAnswer}>
-                <ActivityIndicator color="#00f0ff" />
-                <Text style={styles.loadingText}>生成回答中...</Text>
+            {/* Chinese Answer */}
+            <Text style={styles.labelCN}>中文回答</Text>
+            {mode === 'processing' && !answerCN ? (
+              <View style={styles.loading}>
+                <ActivityIndicator color="#00f0ff" size="small" />
+                <Text style={styles.loadingText}>生成中...</Text>
               </View>
             ) : (
-              <Text style={styles.answer}>{answer || '...'}</Text>
+              <Text style={styles.answerCN}>{answerCN || '...'}</Text>
+            )}
+            
+            <View style={styles.divider} />
+            
+            {/* English Answer */}
+            <Text style={styles.labelEN}>English Answer</Text>
+            {mode === 'processing' && !answerEN ? (
+              <View style={styles.loading}>
+                <ActivityIndicator color="#3b82f6" size="small" />
+                <Text style={styles.loadingText}>Generating...</Text>
+              </View>
+            ) : (
+              <Text style={styles.answerEN}>{answerEN || '...'}</Text>
             )}
           </ScrollView>
           
@@ -331,18 +321,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#0a0a0f',
   },
-  processingBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-    backgroundColor: '#1a1a2e',
-    gap: 8,
-  },
-  processingText: {
-    color: '#00f0ff',
-    fontSize: 14,
-  },
   scrollView: {
     flex: 1,
   },
@@ -352,7 +330,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 16,
-    color: '#00f0ff',
+    color: '#888',
     fontWeight: '600',
     marginBottom: 16,
     textTransform: 'uppercase',
@@ -366,18 +344,37 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: '#333',
-    marginVertical: 30,
+    backgroundColor: '#222',
+    marginVertical: 28,
   },
-  answer: {
+  labelCN: {
+    fontSize: 18,
+    color: '#00f0ff',
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  answerCN: {
     fontSize: 20,
     color: '#e0e0e0',
     lineHeight: 34,
   },
-  loadingAnswer: {
+  labelEN: {
+    fontSize: 18,
+    color: '#3b82f6',
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+  answerEN: {
+    fontSize: 20,
+    color: '#c0c0c0',
+    lineHeight: 34,
+    fontStyle: 'italic',
+  },
+  loading: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    paddingVertical: 10,
   },
   loadingText: {
     color: '#666',

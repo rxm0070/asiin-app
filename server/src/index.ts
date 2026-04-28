@@ -5,41 +5,34 @@ import { ASRClient, LLMClient, Config } from 'coze-coding-dev-sdk';
 const app = express();
 const port = process.env.PORT || 9091;
 
-// Middleware
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 app.get('/api/v1/health', (req, res) => {
-  console.log('Health check success');
   res.status(200).json({ status: 'ok' });
 });
 
-// System prompt - bilingual answer in one call
-const systemPromptBilingual = `You are a professional assistant for ASIIN accreditation at Taizhou University, Computer Science and Technology program.
-
-ABOUT: 泰州学院(13 colleges, 37 programs, 800+ teachers, 13500+ students)
-学院: 信息工程学院(2014年成立, 4个专业)
+// Program info for context
+const programInfo = `泰州学院计算机科学与技术专业 - ASIIN认证座谈
+学校: 13个学院, 37个本科专业, 800+教师, 13500+学生
+学院: 信息工程学院(2014年成立)
 专业: 2015本科招生, 2022省一流专业, 2023卓越工程师计划2.0
 
-CURRICULUM: 模块1基础学科, 模块2专业课程, 模块3通识课程, 模块4综合实践
-核心课程: C语言, 离散数学, 数据结构, 算法, 操作系统, 计算机网络, 软件工程, 人工智能
+课程: 基础学科/专业课程/通识课程/综合实践
+核心: C语言, 离散数学, 数据结构, 算法, 操作系统, 计算机网络, 软件工程, AI
 
-EDUCATIONAL GOALS: 培养应用型计算机工程人才, 12条毕业要求(ASIIN TC04)
-EXAMS: 多样化考核方式
-RESOURCES: 52名教职工(5教授/18副教授/26博士), 19个实验室(1522万元), 1门国家一流课程
-QUALITY: 质量评估与改进体系
-EMPLOYMENT: IT/生物医药/智能制造, 技术骨干或项目经理
-MOBILITY: 江苏省国际化人才培养品牌专业
+培养目标: 应用型计算机工程人才, 12条毕业要求(ASIIN TC04)
+考试: 多样化考核
+资源: 52名教职工(5教授/18副教授/26博士), 19个实验室(1522万元)
+就业: IT/生物医药/智能制造
+国际化: 江苏省国际化人才培养品牌专业`;
 
-IMPORTANT: Answer in Chinese first, then English. Be specific, reference SAR data.`;
-
-// Stream-based Voice Chat API - returns bilingual answers as SSE
+// Stream-based API - returns separate Chinese and English answers
 app.post('/api/v1/chat/stream', async (req, res) => {
   try {
     const { audio } = req.body;
     
-    // SSE headers
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-store, no-transform, must-revalidate');
     res.setHeader('Connection', 'keep-alive');
@@ -55,7 +48,7 @@ app.post('/api/v1/chat/stream', async (req, res) => {
     const asrClient = new ASRClient(config);
     const llmClient = new LLMClient(config);
 
-    // Step 1: ASR
+    // ASR - recognize speech
     const asrResult = await asrClient.recognize({ uid: 'user-001', base64Data: audio });
     const recognizedText = asrResult.text || '';
 
@@ -68,18 +61,59 @@ app.post('/api/v1/chat/stream', async (req, res) => {
     // Send recognized question
     res.write(`data: ${JSON.stringify({ type: 'question', content: recognizedText })}\n\n`);
 
-    // Step 2: Generate bilingual answer in ONE call
-    const messages = [
-      { role: 'system' as const, content: systemPromptBilingual },
+    // Generate Chinese answer
+    const cnMessages = [
+      { role: 'system' as const, content: `你是泰州学院计算机科学与技术专业的ASIIN认证座谈助手。请用纯中文回答问题，不要包含任何英文。
+
+${programInfo}
+
+回答要求：
+- 只用中文回答
+- 专业、简洁、具体
+- 基于以上信息回答` },
       { role: 'user' as const, content: recognizedText }
     ];
 
-    for await (const chunk of llmClient.stream(messages, { 
+    let cnAnswer = '';
+    for await (const chunk of llmClient.stream(cnMessages, { 
       temperature: 0.7,
       model: 'doubao-seed-1-6-251015'
     })) {
       if (chunk.content) {
-        res.write(`data: ${JSON.stringify({ type: 'answer', content: chunk.content.toString() })}\n\n`);
+        cnAnswer += chunk.content.toString();
+        res.write(`data: ${JSON.stringify({ type: 'answer_cn', content: chunk.content.toString() })}\n\n`);
+      }
+    }
+
+    // Generate English answer
+    const enMessages = [
+      { role: 'system' as const, content: `You are an ASIIN accreditation assistant for Taizhou University's Computer Science & Technology program. Answer in English only.
+
+About the program:
+- Taizhou University, 13 colleges, 37 programs, 800+ teachers, 13500+ students
+- College of Information Engineering (founded 2014)
+- 2015 undergrad enrollment, 2022 Jiangsu first-class specialty, 2023 Outstanding Engineer Program 2.0
+
+Curriculum: Basic/Specialized/General/Practical modules
+Core courses: C, Discrete Math, Data Structures, Algorithms, OS, Networks, Software Engineering, AI
+
+Goals: Applied CS engineers, 12 graduation requirements (ASIIN TC04)
+Resources: 52 faculty (5 prof/18 assoc prof/26 PhDs), 19 labs (15.22M yuan)
+Employment: IT/Biomedicine/Manufacturing
+International: Jiangsu brand specialty for international talent cultivation
+
+Answer professionally in English only.` },
+      { role: 'user' as const, content: recognizedText }
+    ];
+
+    let enAnswer = '';
+    for await (const chunk of llmClient.stream(enMessages, { 
+      temperature: 0.7,
+      model: 'doubao-seed-1-6-251015'
+    })) {
+      if (chunk.content) {
+        enAnswer += chunk.content.toString();
+        res.write(`data: ${JSON.stringify({ type: 'answer_en', content: chunk.content.toString() })}\n\n`);
       }
     }
 
