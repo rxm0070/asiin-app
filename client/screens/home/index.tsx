@@ -11,6 +11,7 @@ export default function HomePage() {
   const [mode, setMode] = useState<Mode>('idle');
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [question, setQuestion] = useState<string>('');
+  const [questionCN, setQuestionCN] = useState<string>('');
   const [answerCN, setAnswerCN] = useState<string>('');
   const [answerEN, setAnswerEN] = useState<string>('');
   const [error, setError] = useState<string>('');
@@ -60,6 +61,7 @@ export default function HomePage() {
       recordingRef.current = recording;
       setMode('recording');
       setQuestion('');
+      setQuestionCN('');
       setAnswerCN('');
       setAnswerEN('');
       setError('');
@@ -115,6 +117,7 @@ export default function HomePage() {
 
       setMode('answering');
       setQuestion('');
+      setQuestionCN('');
       setAnswerCN('');
       setAnswerEN('');
 
@@ -135,6 +138,8 @@ export default function HomePage() {
           
           if (data.type === 'question') {
             setQuestion(data.content);
+          } else if (data.type === 'question_cn') {
+            setQuestionCN(data.content);
           } else if (data.type === 'answer_cn') {
             setAnswerCN(prev => prev + data.content);
           } else if (data.type === 'answer_en') {
@@ -167,6 +172,7 @@ export default function HomePage() {
     }
     setMode('idle');
     setQuestion('');
+    setQuestionCN('');
     setAnswerCN('');
     setAnswerEN('');
     setError('');
@@ -181,6 +187,14 @@ export default function HomePage() {
             {/* Question */}
             <Text style={styles.label}>问题</Text>
             <Text style={styles.question}>{question || '...'}</Text>
+            
+            {/* Chinese Question (if English input) */}
+            {questionCN ? (
+              <>
+                <Text style={styles.labelCN}>中文问题</Text>
+                <Text style={styles.questionCN}>{questionCN}</Text>
+              </>
+            ) : null}
             
             <View style={styles.divider} />
             
@@ -341,6 +355,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     lineHeight: 34,
     fontWeight: '600',
+  },
+  questionCN: {
+    fontSize: 20,
+    color: '#00f0ff',
+    lineHeight: 32,
   },
   divider: {
     height: 1,
