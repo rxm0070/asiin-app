@@ -737,7 +737,39 @@ app.post('/api/v1/chat/stream', async (req, res) => {
 
     res.write(`data: ${JSON.stringify({ type: 'question', content: recognizedText })}\n\n`);
 
-    // Generate Chinese answer - STRICTLY follow reference Q&A
+    // Step 1: Detect language and translate if English
+    let questionText = recognizedText;
+    if (/^[a-zA-Z]/.test(recognizedText.trim())) {
+      // English question detected - translate to Chinese first
+      const translateMessages = [
+        { role: 'system' as const, content: `You are a translator. Translate the following English text to Chinese.
+
+IMPORTANT RULES:
+- Translate ACCURATELY into Chinese
+- Keep the meaning EXACTLY the same
+- Use formal but clear Chinese
+- Do NOT add or remove information
+
+Translate to Chinese:` },
+        { role: 'user' as const, content: recognizedText }
+      ];
+
+      let translatedQuestion = '';
+      for await (const chunk of llmClient.stream(translateMessages, { 
+        temperature: 0.1,
+        model: 'doubao-seed-1-6-251015'
+      })) {
+        if (chunk.content) {
+          translatedQuestion += chunk.content.toString();
+        }
+      }
+      
+      // Use Chinese question for answering
+      questionText = translatedQuestion;
+      res.write(`data: ${JSON.stringify({ type: 'question_cn', content: translatedQuestion })}\n\n`);
+    }
+
+    // Step 2: Generate Chinese answer based on the (translated) Chinese question
     const cnMessages = [
       { role: 'system' as const, content: `你是泰州学院计算机科学与技术专业ASIIN认证座谈会的智能助手。
 
@@ -752,7 +784,7 @@ app.post('/api/v1/chat/stream', async (req, res) => {
 
 【参考答案】：
 ${referenceQA}` },
-      { role: 'user' as const, content: recognizedText }
+      { role: 'user' as const, content: questionText }
     ];
 
     let cnAnswer = '';
