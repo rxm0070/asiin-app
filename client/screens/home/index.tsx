@@ -366,9 +366,8 @@ const styles = StyleSheet.create({
   },
   answerEN: {
     fontSize: 20,
-    color: '#c0c0c0',
+    color: '#a0a0a0',
     lineHeight: 34,
-    fontStyle: 'italic',
   },
   loading: {
     flexDirection: 'row',
