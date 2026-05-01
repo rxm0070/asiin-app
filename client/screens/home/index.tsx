@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, ActivityIndicator, Alert, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, Alert, StyleSheet, ScrollView, Platform } from 'react-native';
 import { useState, useRef, useEffect } from 'react';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -6,6 +6,13 @@ import { Screen } from '@/components/Screen';
 import SSE from 'react-native-sse';
 
 type Mode = 'idle' | 'recording' | 'processing' | 'answering';
+
+// Web Audio API types
+interface WebAudioRecorder {
+  mediaRecorder: any;
+  audioChunks: Blob[];
+  startTime: number;
+}
 
 export default function HomePage() {
   const [mode, setMode] = useState<Mode>('idle');
@@ -16,18 +23,10 @@ export default function HomePage() {
   const [answerEN, setAnswerEN] = useState<string>('');
   const [error, setError] = useState<string>('');
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const webRecorderRef = useRef<WebAudioRecorder | null>(null);
   const eventSourceRef = useRef<any>(null);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const { status } = await Audio.requestPermissionsAsync();
-        setHasPermission(status === 'granted');
-      } catch (err) {
-        console.error('Permission error:', err);
-      }
-    })();
-    
     return () => {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
@@ -35,18 +34,110 @@ export default function HomePage() {
     };
   }, []);
 
+  // Request permission before recording
+  const requestPermission = async () => {
+    if (Platform.OS === 'web') {
+      return true;
+    }
+    try {
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status === 'granted') {
+        setHasPermission(true);
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  // Web-specific: Start recording using MediaRecorder API
+  const startWebRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      const audioChunks: Blob[] = [];
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunks.push(event.data);
+        }
+      };
+
+      mediaRecorder.start();
+      
+      webRecorderRef.current = {
+        mediaRecorder,
+        audioChunks,
+        startTime: Date.now(),
+      };
+      
+      setMode('recording');
+      setQuestion('');
+      setQuestionCN('');
+      setAnswerCN('');
+      setAnswerEN('');
+      setError('');
+    } catch (err: any) {
+      Alert.alert('录音失败', err.message || String(err));
+    }
+  };
+
+  // Web-specific: Stop recording and get audio blob
+  const stopWebRecording = async (): Promise<string | null> => {
+    return new Promise((resolve) => {
+      const recorder = webRecorderRef.current;
+      if (!recorder) {
+        resolve(null);
+        return;
+      }
+
+      const duration = Date.now() - recorder.startTime;
+      if (duration < 500) {
+        Alert.alert('录音太短', '请录制至少1秒钟');
+        recorder.mediaRecorder.stop();
+        recorder.mediaRecorder.stream.getTracks().forEach((track: any) => track.stop());
+        webRecorderRef.current = null;
+        setMode('idle');
+        resolve(null);
+        return;
+      }
+
+      recorder.mediaRecorder.onstop = async () => {
+        recorder.mediaRecorder.stream.getTracks().forEach((track: any) => track.stop());
+        
+        const audioBlob = new Blob(recorder.audioChunks, { type: 'audio/webm' });
+        
+        // Convert blob to base64
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64 = (reader.result as string).split(',')[1];
+          webRecorderRef.current = null;
+          resolve(base64);
+        };
+        reader.readAsDataURL(audioBlob);
+      };
+
+      recorder.mediaRecorder.stop();
+    });
+  };
+
   const startRecording = async () => {
+    if (Platform.OS === 'web') {
+      await startWebRecording();
+      return;
+    }
+    
     console.log('Starting recording...');
     setError('');
     
     try {
       if (!hasPermission) {
-        const { status } = await Audio.requestPermissionsAsync();
-        if (status !== 'granted') {
+        const granted = await requestPermission();
+        if (!granted) {
           Alert.alert('需要权限', '请授予麦克风权限');
           return;
         }
-        setHasPermission(true);
       }
 
       if (recordingRef.current) {
@@ -71,6 +162,15 @@ export default function HomePage() {
   };
 
   const stopRecording = async () => {
+    if (Platform.OS === 'web') {
+      const base64 = await stopWebRecording();
+      if (base64 && base64.length > 100) {
+        setMode('processing');
+        await processAudioFromBase64(base64);
+      }
+      return;
+    }
+
     if (!recordingRef.current) return;
 
     try {
@@ -101,6 +201,71 @@ export default function HomePage() {
     }
   };
 
+  // Process audio from base64 (Web)
+  const getBaseUrl = () => {
+    // 生产环境使用阿里云服务器
+    if (process.env.NODE_ENV === 'production') {
+      return 'http://120.55.245.100:9091';
+    }
+    // 开发环境使用环境变量
+    return process.env.EXPO_PUBLIC_BACKEND_BASE_URL || 'http://localhost:9091';
+  };
+
+  const processAudioFromBase64 = async (base64Audio: string) => {
+    setError('');
+    
+    if (base64Audio.length < 100) {
+      Alert.alert('错误', '录音文件太小');
+      setMode('idle');
+      return;
+    }
+
+    setMode('answering');
+    setQuestion('');
+    setQuestionCN('');
+    setAnswerCN('');
+    setAnswerEN('');
+
+    const baseUrl = getBaseUrl();
+    const url = `${baseUrl}/api/v1/chat/stream`;
+    
+    const eventSource = new SSE(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio: base64Audio }),
+    });
+    
+    eventSourceRef.current = eventSource;
+
+    eventSource.addEventListener('message', (e: any) => {
+      try {
+        const data = JSON.parse(e.data);
+        
+        if (data.type === 'question') {
+          setQuestion(data.content);
+        } else if (data.type === 'question_cn') {
+          setQuestionCN(data.content);
+        } else if (data.type === 'answer_cn') {
+          setAnswerCN(prev => prev + data.content);
+        } else if (data.type === 'answer_en') {
+          setAnswerEN(prev => prev + data.content);
+        } else if (data.type === 'done') {
+          eventSource.close();
+        } else if (data.type === 'error') {
+          setError(data.message);
+          eventSource.close();
+        }
+      } catch (err) {}
+    });
+
+    eventSource.addEventListener('error', () => {
+      eventSource.close();
+      Alert.alert('错误', '连接失败');
+      setMode('idle');
+    });
+  };
+
+  // Process audio from URI (Native)
   const processAudio = async (audioUri: string) => {
     setError('');
     
@@ -115,50 +280,7 @@ export default function HomePage() {
         return;
       }
 
-      setMode('answering');
-      setQuestion('');
-      setQuestionCN('');
-      setAnswerCN('');
-      setAnswerEN('');
-
-      const baseUrl = process.env.EXPO_PUBLIC_BACKEND_BASE_URL;
-      const url = `${baseUrl}/api/v1/chat/stream`;
-      
-      const eventSource = new SSE(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audio: base64Audio }),
-      });
-      
-      eventSourceRef.current = eventSource;
-
-      eventSource.addEventListener('message', (e: any) => {
-        try {
-          const data = JSON.parse(e.data);
-          
-          if (data.type === 'question') {
-            setQuestion(data.content);
-          } else if (data.type === 'question_cn') {
-            setQuestionCN(data.content);
-          } else if (data.type === 'answer_cn') {
-            setAnswerCN(prev => prev + data.content);
-          } else if (data.type === 'answer_en') {
-            setAnswerEN(prev => prev + data.content);
-          } else if (data.type === 'done') {
-            eventSource.close();
-          } else if (data.type === 'error') {
-            setError(data.message);
-            eventSource.close();
-          }
-        } catch (err) {}
-      });
-
-      eventSource.addEventListener('error', () => {
-        eventSource.close();
-        Alert.alert('错误', '连接失败');
-        setMode('idle');
-      });
-
+      await processAudioFromBase64(base64Audio);
     } catch (err: any) {
       Alert.alert('错误', '处理失败');
       setMode('idle');
@@ -301,19 +423,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     shadowColor: '#00f0ff',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
+    shadowOpacity: 0.5,
     shadowRadius: 20,
     elevation: 10,
   },
   recordingButton: {
-    backgroundColor: '#ef4444',
-    shadowColor: '#ef4444',
+    backgroundColor: '#ff3b30',
+    shadowColor: '#ff3b30',
   },
   recordIcon: {
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: '#0a0a0f',
+    backgroundColor: '#fff',
   },
   recordingIcon: {
     width: 24,
@@ -322,111 +444,113 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   hint: {
-    fontSize: 16,
-    color: '#fff',
     marginTop: 30,
+    fontSize: 16,
+    color: '#00f0ff',
   },
   subHint: {
+    marginTop: 10,
     fontSize: 12,
     color: '#666',
-    marginTop: 8,
   },
   fullScreen: {
     flex: 1,
     backgroundColor: '#0a0a0f',
+    padding: 20,
   },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    padding: 24,
-    paddingBottom: 100,
+    paddingBottom: 20,
   },
   label: {
-    fontSize: 16,
-    color: '#888',
-    fontWeight: '600',
-    marginBottom: 16,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+  },
+  labelCN: {
+    fontSize: 14,
+    color: '#00f0ff',
+    marginBottom: 8,
+    marginTop: 16,
+  },
+  labelEN: {
+    fontSize: 14,
+    color: '#3b82f6',
+    marginBottom: 8,
+    marginTop: 16,
   },
   question: {
-    fontSize: 22,
+    fontSize: 18,
     color: '#fff',
-    lineHeight: 34,
-    fontWeight: '600',
+    lineHeight: 26,
   },
   questionCN: {
-    fontSize: 20,
+    fontSize: 16,
     color: '#00f0ff',
-    lineHeight: 32,
+    lineHeight: 24,
+    backgroundColor: 'rgba(0, 240, 255, 0.1)',
+    padding: 12,
+    borderRadius: 8,
   },
   divider: {
     height: 1,
     backgroundColor: '#222',
-    marginVertical: 28,
-  },
-  labelCN: {
-    fontSize: 18,
-    color: '#00f0ff',
-    fontWeight: '700',
-    marginBottom: 16,
+    marginVertical: 20,
   },
   answerCN: {
-    fontSize: 20,
+    fontSize: 16,
     color: '#e0e0e0',
-    lineHeight: 34,
-  },
-  labelEN: {
-    fontSize: 18,
-    color: '#3b82f6',
-    fontWeight: '700',
-    marginBottom: 16,
+    lineHeight: 26,
   },
   answerEN: {
-    fontSize: 20,
+    fontSize: 14,
     color: '#a0a0a0',
-    lineHeight: 34,
+    lineHeight: 24,
+    fontStyle: 'italic',
   },
   loading: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 10,
+    padding: 20,
   },
   loadingText: {
+    marginLeft: 10,
     color: '#666',
     fontSize: 14,
   },
   resetButton: {
-    position: 'absolute',
-    bottom: 50,
-    left: 24,
-    right: 24,
-    backgroundColor: '#00f0ff',
-    paddingVertical: 16,
-    borderRadius: 12,
+    backgroundColor: '#1a1a2e',
+    borderWidth: 1,
+    borderColor: '#00f0ff',
+    paddingVertical: 14,
+    paddingHorizontal: 30,
+    borderRadius: 25,
     alignItems: 'center',
+    marginTop: 20,
   },
   resetText: {
+    color: '#00f0ff',
     fontSize: 16,
     fontWeight: '600',
-    color: '#0a0a0f',
   },
   errorText: {
-    color: '#ef4444',
+    color: '#ff3b30',
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 20,
   },
   retryButton: {
-    backgroundColor: '#00f0ff',
-    paddingHorizontal: 40,
+    backgroundColor: '#1a1a2e',
+    borderWidth: 1,
+    borderColor: '#ff3b30',
     paddingVertical: 12,
-    borderRadius: 8,
+    paddingHorizontal: 30,
+    borderRadius: 25,
   },
   retryText: {
-    color: '#0a0a0f',
-    fontWeight: '600',
+    color: '#ff3b30',
+    fontSize: 14,
   },
 });
